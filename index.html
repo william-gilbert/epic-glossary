@@ -170,7 +170,7 @@ body::after {
 /* Question counter */
 #q-label {
   font-family: var(--fm); font-size: 13px; letter-spacing: .22em; color: var(--red);
-  text-transform: uppercase; align-self: flex-start;
+  text-transform: uppercase; align-self: center; text-align: center;
   opacity: 0; animation: none;
 }
 #q-label.show { animation: riseIn .4s ease both; }
@@ -337,6 +337,41 @@ body::after {
 .ao-skip:hover { color: var(--text); border-color: var(--red-hi); }
 
 /* ==============================================
+   BONUS INTERSTITIAL
+============================================== */
+#s-bonus {
+  background: var(--bg); align-items: center; justify-content: center;
+}
+.bonus-inner {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  animation: riseIn .6s both;
+}
+.bonus-tag {
+  font-family: var(--fm); font-size: 11px; letter-spacing: .24em; color: var(--muted);
+  border: 1px solid var(--bdr); padding: 5px 18px; border-radius: 2px;
+  text-transform: uppercase; margin-bottom: 28px;
+}
+.bonus-title {
+  font-family: var(--fd); font-size: clamp(72px,9vw,120px); line-height: .9;
+  text-transform: uppercase; text-shadow: 0 0 60px rgba(255,214,0,.15);
+  color: var(--yellow);
+}
+.bonus-title .r { color: var(--red); display: block; }
+.bonus-sub {
+  font-family: var(--fm); font-size: 14px; color: var(--muted);
+  letter-spacing: .1em; margin-top: 18px;
+}
+.bonus-btns {
+  margin-top: 44px; display: flex; flex-direction: column; align-items: center; gap: 16px;
+}
+.bonus-skip {
+  font-family: var(--fm); font-size: 11px; letter-spacing: .12em; color: var(--muted);
+  background: transparent; border: 1px solid var(--bdr); border-radius: 2px;
+  padding: 9px 22px; cursor: pointer; transition: all .15s; text-transform: uppercase;
+}
+.bonus-skip:hover { color: var(--text); border-color: var(--red-hi); }
+
+/* ==============================================
    END SCREEN
 ============================================== */
 #s-end {
@@ -448,6 +483,21 @@ body::after {
 </div>
 
 <!-- ========================================
+     BONUS SCREEN
+======================================== -->
+<div id="s-bonus" class="screen gone">
+  <div class="bonus-inner">
+    <div class="bonus-tag">MAIN ROUND COMPLETE</div>
+    <h2 class="bonus-title">⭐ Bonus<br><span class="r">Round</span></h2>
+    <p class="bonus-sub">2 extra questions — play if time permits</p>
+    <div class="bonus-btns">
+      <button class="t-start" onclick="startBonus()">▶ PLAY BONUS ROUND</button>
+      <button class="bonus-skip" onclick="endGame()">SKIP TO RESULTS →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================
      END SCREEN
 ======================================== -->
 <div id="s-end" class="screen gone">
@@ -470,7 +520,7 @@ body::after {
 /* =========================================
    GAME DATA  — edit terms/defs here freely
 ========================================= */
-const DATA = [
+const MAIN_DATA = [
   { id:'cadence',      term:'Cadence',          def:'Enterprise scheduling system for managing outpatient appointments and provider calendars.' },
   { id:'mychart',      term:'MyChart',           def:'Patient portal that allows patients to view records, message providers, schedule appointments, and manage care.' },
   { id:'prelude',      term:'Prelude',           def:'Patient registration system for capturing demographics, insurance, and visit information.' },
@@ -478,11 +528,23 @@ const DATA = [
   { id:'radiant',      term:'Radiant',           def:'Radiology information system supporting imaging orders, scheduling, and results reporting.' },
   { id:'beaker',       term:'Beaker',            def:'Laboratory information system that supports specimen tracking, testing workflows, and result reporting.' },
   { id:'asap',         term:'ASAP',              def:'Supports emergency department workflows, including triage, tracking, documentation, and discharge.' },
-  { id:'stork',        term:'Stork',             def:'Obstetrics module supporting prenatal care, labor and delivery, and newborn documentation.' },
-  { id:'willow',       term:'Willow Inpatient',  def:'Inpatient pharmacy system supporting medication verification, dispensing, and administration.' },
   { id:'grandcentral', term:'Grand Central',     def:'Manages hospital admissions, discharges, transfers, and bed management.' },
+];
+const BONUS_DATA = [
   { id:'haiku',        term:'Haiku',             def:'Mobile application for physicians to access and document in Epic from a smartphone.' },
-  { id:'cogito',       term:'Cogito',            def:"Epic's analytics and reporting suite for dashboards, operational reporting, and data insights." }
+  { id:'cogito',       term:'Cogito',            def:"Epic's analytics and reporting suite for dashboards, operational reporting, and data insights." },
+];
+// Full pool for distractor picking — all other Epic module names from the glossary
+const ALL_DATA = [...MAIN_DATA, ...BONUS_DATA];
+
+const DISTRACTOR_POOL = [
+  'Anesthesia','Beacon','Beans Dialysis','Behavioral Health','Bones','Bugsy',
+  'Canto','Care Everywhere','Clinical Case Management','Comfort','Community Connect',
+  'Compass Rose','Cupid','Dermatology','EpicCare Ambulatory','EpicCare Inpatient',
+  'EpicCare Link','EpicCare Urgent Care','Genomics','Healthy Planet','HOD',
+  'Identity','Long Term Care','Lumens','Referrals & Authorizations','Rehab',
+  'Research','Resolute HB','Resolute PB','Stork','Welcome',
+  'Willow Ambulatory','Willow Inventory','Wisdom',
 ];
 const LETTERS = ['A','B','C','D'];
 
@@ -491,10 +553,11 @@ const LETTERS = ['A','B','C','D'];
 ========================================= */
 let timerOn   = false;
 let soundOn   = false;
-let questions = [];   // shuffled question list
-let qIdx      = 0;    // current question index
-let pool      = [];   // shuffled [correct + 3 distractors] for current Q
+let questions = [];
+let qIdx      = 0;
+let pool      = [];
 let answered  = false;
+let bonusMode = false;   // true when playing bonus round
 let timerSec  = 0;
 let timerInt  = null;
 let audioCtx  = null;
@@ -576,16 +639,26 @@ function showTitle() {
   show('s-title'); hide('s-game'); hide('s-end');
 }
 function startGame() {
-  questions = shuffle(DATA);
+  bonusMode = false;
+  questions = shuffle(MAIN_DATA);
   qIdx = 0; answered = false;
-  hide('s-title'); hide('s-end'); hide('ans-overlay');
+  hide('s-title'); hide('s-end'); hide('ans-overlay'); hide('s-bonus');
   show('s-game');
   buildPips();
   startClock();
   renderQ();
 }
+function startBonus() {
+  bonusMode = true;
+  questions = shuffle(BONUS_DATA);
+  qIdx = 0; answered = false;
+  hide('s-bonus'); hide('ans-overlay');
+  show('s-game');
+  buildPips();
+  renderQ();
+}
 function resetGame() {
-  hide('ans-overlay');
+  hide('ans-overlay'); hide('s-bonus');
   startGame();
 }
 
@@ -621,7 +694,8 @@ function renderQ() {
 
   /* Q label */
   const ql = document.getElementById('q-label');
-  ql.textContent = `QUESTION ${String(qIdx+1).padStart(2,'0')} / ${String(tot).padStart(2,'0')}`;
+  const prefix = bonusMode ? '⭐ BONUS ' : '';
+  ql.textContent = `${prefix}QUESTION ${String(qIdx+1).padStart(2,'0')} / ${String(tot).padStart(2,'0')}`;
   ql.classList.remove('show');
   void ql.offsetWidth;
   ql.classList.add('show');
@@ -635,8 +709,12 @@ function renderQ() {
 
   updatePips();
 
-  /* Build choice pool: correct + 3 random wrong, shuffled */
-  const distractors = shuffle(DATA.filter(d => d.id !== q.id)).slice(0, 3);
+  /* Build choice pool: correct answer + 3 distractors from the wide pool */
+  const usedNames = ALL_DATA.map(d => d.term); // names already in play as questions
+  const distractorNames = shuffle(
+    DISTRACTOR_POOL.filter(name => name !== q.term)
+  ).slice(0, 3);
+  const distractors = distractorNames.map(name => ({ id: name, term: name, def: '' }));
   pool = shuffle([q, ...distractors]);
 
   /* Render chips (hidden) */
@@ -705,7 +783,7 @@ function handlePick(chosenId, correctId, chip) {
    ANSWER OVERLAY
 ========================================= */
 function showAnswerOverlay(correctId) {
-  const item = DATA.find(d => d.id === correctId);
+  const item = ALL_DATA.find(d => d.id === correctId);
   document.getElementById('ao-term').textContent = item.term;
   document.getElementById('ao-def').textContent  = item.def;
   show('ans-overlay');
@@ -716,8 +794,20 @@ function nextQ() {
   const p = document.getElementById(`pip-${qIdx}`);
   if (p) p.className = 'pip done';
   qIdx++;
-  if (qIdx >= questions.length) endGame();
-  else renderQ();
+  if (qIdx >= questions.length) {
+    if (bonusMode) endGame();
+    else showBonusScreen();
+  } else {
+    renderQ();
+  }
+}
+
+/* =========================================
+   BONUS SCREEN
+========================================= */
+function showBonusScreen() {
+  hide('s-game');
+  show('s-bonus');
 }
 
 /* =========================================
